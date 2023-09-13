@@ -1,0 +1,142 @@
+#!/usr/bin/env bash
+
+usage_error () { echo >&2 "$(basename "$0"):  $1"; exit 2; }
+assert_argument () { test "$1" != "${EOL}" || usage_error "$2 requires an argument"; }
+
+show_options() {
+    echo "Usage: build [OPTIONS]";
+    echo "Options:";
+    echo "-h    / --help            - Show this help";
+    echo "-pgo1 / --pgo_generate    - PGO Generate";
+    echo "-pgo2 / --pgo_use         - PGO Use";
+    echo "-t    / --test            - Test";
+    echo "";
+}
+
+PGO_GENERATE_OPT="";
+PGO_USE_OPT="";
+TEST_OPT="";
+# shellcheck disable=SC2116,SC2028,SC2001,SC2312
+if [[ "$#" != 0 ]]; then
+    EOL=$(echo '\01\03\03\07')
+    set -- "$@" "${EOL}"
+    while [[ "$1" != "${EOL}" ]]; do
+        opt="$1"; shift
+        case "${opt}" in
+            # Your options go here.
+            -h|--help) help='true';;
+            -pgo1|--pgo_generate) pgo_generate='true';;
+            -pgo2|--pgo_use) pgo_use='true';;
+            -t|--test) test='true';;
+
+            # Arguments processing. You may remove any unneeded line after the 1st.
+            # positional argument, rotate to the end
+            -|''|[!-]*) set -- "$@" "${opt}";;
+            # convert '--name=arg' to '--name' 'arg'
+            --*=*)      set -- "${opt%%=*}" "${opt#*=}" "$@";;
+            -[!-]?*)    set -- "$(echo "${opt#-}" | sed 's/\(.\)/ -\1/g')" "$@";;       # convert '-abc' to '-a' '-b' '-c'
+            --)         while [[ "$1" != "${EOL}" ]]; do set -- "$@" "$1"; shift; done;;  # process remaining arguments as positional
+            -*)         usage_error "unknown option: '${opt}'";;                        # catch misspelled options
+            *)          usage_error "this should NEVER happen (${opt})";;               # sanity test for previous patterns
+        esac
+  done
+  shift  # $EOL
+fi
+
+if [[ -n "${help+x}" ]]; then
+    show_options;
+    exit 0;
+elif [[ -n "${pgo_generate+x}" ]]; then
+    PGO_GENERATE_OPT="true";
+elif [[ -n "${pgo_use+x}" ]]; then
+    PGO_USE_OPT="true";
+elif [[ -n "${test+x}" ]]; then
+    TEST_OPT="true";
+else
+    show_options;
+    exit 0;
+fi
+
+
+unset ASFLAGS
+export AR=gcc-ar
+export RANLIB=gcc-ranlib
+export NM=gcc-nm
+export PGO_GEN="-Wno-inline -fprofile-generate=/var/tmp/pgo -fprofile-dir=/var/tmp/pgo -fprofile-abs-path -fprofile-update=atomic -fprofile-arcs -ftest-coverage -fprofile-partial-training -fprofile-correction -freorder-functions --coverage -lgcov"
+export PGO_USE="-Wno-inline -Wmissing-profile -Wcoverage-mismatch -Wno-error=missing-profile -fprofile-use=/var/tmp/pgo2 -fprofile-dir=/var/tmp/pgo2 -fprofile-abs-path -fprofile-update=atomic -fprofile-partial-training -fprofile-correction -freorder-functions"
+#
+export CFLAGS_GENERATE="-flto=auto --param=lto-max-streaming-parallelism=20 -fipa-pta -m64 -Ofast -mno-vzeroupper -march=skylake -mtune=skylake -mavx -mavx2 -msse2avx -Wall -Wl,--as-needed -Wl,--build-id=sha1 -Wl,--enable-new-dtags -Wl,--hash-style=gnu -Wl,-O2 -Wl,-z,now,-z,relro,-z,max-page-size=0x1000,-z,separate-code -Wno-error -mprefer-vector-width=256 -falign-functions=32 -fdevirtualize-at-ltrans -floop-nest-optimize -floop-block -fno-math-errno -fno-semantic-interposition -Wl,-Bsymbolic-functions -fno-stack-protector -fno-trapping-math -ftree-loop-distribute-patterns -ftree-loop-vectorize -ftree-slp-vectorize -ftree-vectorize -fuse-ld=bfd -fuse-linker-plugin -malign-data=cacheline -mrelax-cmpxchg-loop -feliminate-unused-debug-symbols -feliminate-unused-debug-types -flive-range-shrinkage -fno-plt -mtls-dialect=gnu2 -Wl,-sort-common -Wno-error -Wp,-D_REENTRANT -pipe -ffat-lto-objects -fomit-frame-pointer -static-libstdc++ -static-libgcc -mrelax-cmpxchg-loop -pthread -Wl,--build-id=sha1 -Wno-inline -Wno-comment -Wno-int-in-bool-context -fasynchronous-unwind-tables -fPIC ${PGO_GEN}"
+export ASMFLAGS_GENERATE="-flto=auto --param=lto-max-streaming-parallelism=20 -fipa-pta -m64 -Ofast -mno-vzeroupper -march=skylake -mtune=skylake -mavx -mavx2 -msse2avx -Wall -Wl,--as-needed -Wl,--build-id=sha1 -Wl,--enable-new-dtags -Wl,--hash-style=gnu -Wl,-O2 -Wl,-z,now,-z,relro,-z,max-page-size=0x1000,-z,separate-code -Wno-error -mprefer-vector-width=256 -falign-functions=32 -fdevirtualize-at-ltrans -floop-nest-optimize -floop-block -fno-math-errno -fno-semantic-interposition -Wl,-Bsymbolic-functions -fno-stack-protector -fno-trapping-math -ftree-loop-distribute-patterns -ftree-loop-vectorize -ftree-slp-vectorize -ftree-vectorize -fuse-ld=bfd -fuse-linker-plugin -malign-data=cacheline -mrelax-cmpxchg-loop -feliminate-unused-debug-symbols -feliminate-unused-debug-types -flive-range-shrinkage -fno-plt -mtls-dialect=gnu2 -Wl,-sort-common -Wno-error -Wp,-D_REENTRANT -pipe -ffat-lto-objects -fomit-frame-pointer -static-libstdc++ -static-libgcc -mrelax-cmpxchg-loop -pthread -Wl,--build-id=sha1 -Wno-inline -Wno-comment -Wno-int-in-bool-context -fasynchronous-unwind-tables -fPIC ${PGO_GEN}"
+export FCFLAGS_GENERATE="-flto=auto --param=lto-max-streaming-parallelism=20 -fipa-pta -m64 -Ofast -mno-vzeroupper -march=skylake -mtune=skylake -mavx -mavx2 -msse2avx -Wall -Wl,--as-needed -Wl,--build-id=sha1 -Wl,--enable-new-dtags -Wl,--hash-style=gnu -Wl,-O2 -Wl,-z,now,-z,relro,-z,max-page-size=0x1000,-z,separate-code -Wno-error -mprefer-vector-width=256 -falign-functions=32 -fdevirtualize-at-ltrans -floop-nest-optimize -floop-block -fno-math-errno -fno-semantic-interposition -Wl,-Bsymbolic-functions -fno-stack-protector -fno-trapping-math -ftree-loop-distribute-patterns -ftree-loop-vectorize -ftree-slp-vectorize -ftree-vectorize -fuse-ld=bfd -fuse-linker-plugin -malign-data=cacheline -mrelax-cmpxchg-loop -feliminate-unused-debug-symbols -feliminate-unused-debug-types -flive-range-shrinkage -fno-plt -mtls-dialect=gnu2 -Wl,-sort-common -Wno-error -Wp,-D_REENTRANT -pipe -ffat-lto-objects -fomit-frame-pointer -static-libstdc++ -static-libgcc -mrelax-cmpxchg-loop -pthread -Wl,--build-id=sha1 -Wno-inline -Wno-comment -Wno-int-in-bool-context -fasynchronous-unwind-tables -fPIC ${PGO_GEN}"
+export FFLAGS_GENERATE="-flto=auto --param=lto-max-streaming-parallelism=20 -fipa-pta -m64 -Ofast -mno-vzeroupper -march=skylake -mtune=skylake -mavx -mavx2 -msse2avx -Wall -Wl,--as-needed -Wl,--build-id=sha1 -Wl,--enable-new-dtags -Wl,--hash-style=gnu -Wl,-O2 -Wl,-z,now,-z,relro,-z,max-page-size=0x1000,-z,separate-code -Wno-error -mprefer-vector-width=256 -falign-functions=32 -fdevirtualize-at-ltrans -floop-nest-optimize -floop-block -fno-math-errno -fno-semantic-interposition -Wl,-Bsymbolic-functions -fno-stack-protector -fno-trapping-math -ftree-loop-distribute-patterns -ftree-loop-vectorize -ftree-slp-vectorize -ftree-vectorize -fuse-ld=bfd -fuse-linker-plugin -malign-data=cacheline -mrelax-cmpxchg-loop -feliminate-unused-debug-symbols -feliminate-unused-debug-types -flive-range-shrinkage -fno-plt -mtls-dialect=gnu2 -Wl,-sort-common -Wno-error -Wp,-D_REENTRANT -pipe -ffat-lto-objects -fomit-frame-pointer -static-libstdc++ -static-libgcc -mrelax-cmpxchg-loop -pthread -Wl,--build-id=sha1 -Wno-inline -Wno-comment -Wno-int-in-bool-context -fasynchronous-unwind-tables -fPIC ${PGO_GEN}"
+export LDFLAGS_GENERATE="-flto=auto --param=lto-max-streaming-parallelism=20 -fipa-pta -m64 -Ofast -mno-vzeroupper -march=skylake -mtune=skylake -mavx -mavx2 -msse2avx -Wall -Wl,--as-needed -Wl,--build-id=sha1 -Wl,--enable-new-dtags -Wl,--hash-style=gnu -Wl,-O2 -Wl,-z,now,-z,relro,-z,max-page-size=0x1000,-z,separate-code -Wno-error -mprefer-vector-width=256 -falign-functions=32 -fdevirtualize-at-ltrans -floop-nest-optimize -floop-block -fno-math-errno -fno-semantic-interposition -Wl,-Bsymbolic-functions -fno-stack-protector -fno-trapping-math -ftree-loop-distribute-patterns -ftree-loop-vectorize -ftree-slp-vectorize -ftree-vectorize -fuse-ld=bfd -fuse-linker-plugin -malign-data=cacheline -mrelax-cmpxchg-loop -feliminate-unused-debug-symbols -feliminate-unused-debug-types -flive-range-shrinkage -fno-plt -mtls-dialect=gnu2 -Wl,-sort-common -Wno-error -Wp,-D_REENTRANT -pipe -ffat-lto-objects -fomit-frame-pointer -static-libstdc++ -static-libgcc -mrelax-cmpxchg-loop -pthread -Wl,--build-id=sha1 -Wno-inline -Wno-comment -Wno-int-in-bool-context -fasynchronous-unwind-tables -fPIC ${PGO_GEN}"
+export CXXFLAGS_GENERATE="-flto=auto --param=lto-max-streaming-parallelism=20 -fipa-pta -fvisibility-inlines-hidden -m64 -Ofast -mno-vzeroupper -march=skylake -mtune=skylake -mavx -mavx2 -msse2avx -Wall -Wl,--as-needed -Wl,--build-id=sha1 -Wl,--enable-new-dtags -Wl,--hash-style=gnu -Wl,-O2 -Wl,-z,now,-z,relro,-z,max-page-size=0x1000,-z,separate-code -Wno-error -mprefer-vector-width=256 -falign-functions=32 -fdevirtualize-at-ltrans -floop-nest-optimize -floop-block -fno-math-errno -fno-semantic-interposition -Wl,-Bsymbolic-functions -fno-stack-protector -fno-trapping-math -ftree-loop-distribute-patterns -ftree-loop-vectorize -ftree-slp-vectorize -ftree-vectorize -fuse-ld=bfd -fuse-linker-plugin -malign-data=cacheline -mrelax-cmpxchg-loop -feliminate-unused-debug-symbols -feliminate-unused-debug-types -flive-range-shrinkage -fno-plt -mtls-dialect=gnu2 -Wl,-sort-common -Wno-error -Wp,-D_REENTRANT -pipe -ffat-lto-objects -fomit-frame-pointer -static-libstdc++ -static-libgcc -mrelax-cmpxchg-loop -pthread -Wl,--build-id=sha1 -Wno-inline -Wno-class-memaccess -Wno-comment -Wno-int-in-bool-context -fasynchronous-unwind-tables -fPIC ${PGO_GEN}"
+export LIBS_GENERATE="-lgcov"
+#
+export CFLAGS_USE="-flto=auto --param=lto-max-streaming-parallelism=20 -fipa-pta -m64 -Ofast -mno-vzeroupper -march=skylake -mtune=skylake -mavx -mavx2 -msse2avx -Wall -Wl,--as-needed -Wl,--build-id=sha1 -Wl,--enable-new-dtags -Wl,--hash-style=gnu -Wl,-O2 -Wl,-z,now,-z,relro,-z,max-page-size=0x1000,-z,separate-code -Wno-error -mprefer-vector-width=256 -falign-functions=32 -fdevirtualize-at-ltrans -floop-nest-optimize -floop-block -fno-math-errno -fno-semantic-interposition -Wl,-Bsymbolic-functions -fno-stack-protector -fno-trapping-math -ftree-loop-distribute-patterns -ftree-loop-vectorize -ftree-slp-vectorize -ftree-vectorize -fuse-ld=bfd -fuse-linker-plugin -malign-data=cacheline -mrelax-cmpxchg-loop -feliminate-unused-debug-symbols -feliminate-unused-debug-types -flive-range-shrinkage -fno-plt -mtls-dialect=gnu2 -Wl,-sort-common -Wno-error -Wp,-D_REENTRANT -pipe -ffat-lto-objects -fomit-frame-pointer -static-libstdc++ -static-libgcc -mrelax-cmpxchg-loop -pthread -Wl,--build-id=sha1 -Wno-inline -Wno-comment -Wno-int-in-bool-context -fasynchronous-unwind-tables -fPIC ${PGO_USE}"
+export ASMFLAGS_USE="-flto=auto --param=lto-max-streaming-parallelism=20 -fipa-pta -m64 -Ofast -mno-vzeroupper -march=skylake -mtune=skylake -mavx -mavx2 -msse2avx -Wall -Wl,--as-needed -Wl,--build-id=sha1 -Wl,--enable-new-dtags -Wl,--hash-style=gnu -Wl,-O2 -Wl,-z,now,-z,relro,-z,max-page-size=0x1000,-z,separate-code -Wno-error -mprefer-vector-width=256 -falign-functions=32 -fdevirtualize-at-ltrans -floop-nest-optimize -floop-block -fno-math-errno -fno-semantic-interposition -Wl,-Bsymbolic-functions -fno-stack-protector -fno-trapping-math -ftree-loop-distribute-patterns -ftree-loop-vectorize -ftree-slp-vectorize -ftree-vectorize -fuse-ld=bfd -fuse-linker-plugin -malign-data=cacheline -mrelax-cmpxchg-loop -feliminate-unused-debug-symbols -feliminate-unused-debug-types -flive-range-shrinkage -fno-plt -mtls-dialect=gnu2 -Wl,-sort-common -Wno-error -Wp,-D_REENTRANT -pipe -ffat-lto-objects -fomit-frame-pointer -static-libstdc++ -static-libgcc -mrelax-cmpxchg-loop -pthread -Wl,--build-id=sha1 -Wno-inline -Wno-comment -Wno-int-in-bool-context -fasynchronous-unwind-tables -fPIC ${PGO_USE}"
+export FCFLAGS_USE="-flto=auto --param=lto-max-streaming-parallelism=20 -fipa-pta -m64 -Ofast -mno-vzeroupper -march=skylake -mtune=skylake -mavx -mavx2 -msse2avx -Wall -Wl,--as-needed -Wl,--build-id=sha1 -Wl,--enable-new-dtags -Wl,--hash-style=gnu -Wl,-O2 -Wl,-z,now,-z,relro,-z,max-page-size=0x1000,-z,separate-code -Wno-error -mprefer-vector-width=256 -falign-functions=32 -fdevirtualize-at-ltrans -floop-nest-optimize -floop-block -fno-math-errno -fno-semantic-interposition -Wl,-Bsymbolic-functions -fno-stack-protector -fno-trapping-math -ftree-loop-distribute-patterns -ftree-loop-vectorize -ftree-slp-vectorize -ftree-vectorize -fuse-ld=bfd -fuse-linker-plugin -malign-data=cacheline -mrelax-cmpxchg-loop -feliminate-unused-debug-symbols -feliminate-unused-debug-types -flive-range-shrinkage -fno-plt -mtls-dialect=gnu2 -Wl,-sort-common -Wno-error -Wp,-D_REENTRANT -pipe -ffat-lto-objects -fomit-frame-pointer -static-libstdc++ -static-libgcc -mrelax-cmpxchg-loop -pthread -Wl,--build-id=sha1 -Wno-inline -Wno-comment -Wno-int-in-bool-context -fasynchronous-unwind-tables -fPIC ${PGO_USE}"
+export FFLAGS_USE="-flto=auto --param=lto-max-streaming-parallelism=20 -fipa-pta -m64 -Ofast -mno-vzeroupper -march=skylake -mtune=skylake -mavx -mavx2 -msse2avx -Wall -Wl,--as-needed -Wl,--build-id=sha1 -Wl,--enable-new-dtags -Wl,--hash-style=gnu -Wl,-O2 -Wl,-z,now,-z,relro,-z,max-page-size=0x1000,-z,separate-code -Wno-error -mprefer-vector-width=256 -falign-functions=32 -fdevirtualize-at-ltrans -floop-nest-optimize -floop-block -fno-math-errno -fno-semantic-interposition -Wl,-Bsymbolic-functions -fno-stack-protector -fno-trapping-math -ftree-loop-distribute-patterns -ftree-loop-vectorize -ftree-slp-vectorize -ftree-vectorize -fuse-ld=bfd -fuse-linker-plugin -malign-data=cacheline -mrelax-cmpxchg-loop -feliminate-unused-debug-symbols -feliminate-unused-debug-types -flive-range-shrinkage -fno-plt -mtls-dialect=gnu2 -Wl,-sort-common -Wno-error -Wp,-D_REENTRANT -pipe -ffat-lto-objects -fomit-frame-pointer -static-libstdc++ -static-libgcc -mrelax-cmpxchg-loop -pthread -Wl,--build-id=sha1 -Wno-inline -Wno-comment -Wno-int-in-bool-context -fasynchronous-unwind-tables -fPIC ${PGO_USE}"
+export LDFLAGS_USE="-flto=auto --param=lto-max-streaming-parallelism=20 -fipa-pta -m64 -Ofast -mno-vzeroupper -march=skylake -mtune=skylake -mavx -mavx2 -msse2avx -Wall -Wl,--as-needed -Wl,--build-id=sha1 -Wl,--enable-new-dtags -Wl,--hash-style=gnu -Wl,-O2 -Wl,-z,now,-z,relro,-z,max-page-size=0x1000,-z,separate-code -Wno-error -mprefer-vector-width=256 -falign-functions=32 -fdevirtualize-at-ltrans -floop-nest-optimize -floop-block -fno-math-errno -fno-semantic-interposition -Wl,-Bsymbolic-functions -fno-stack-protector -fno-trapping-math -ftree-loop-distribute-patterns -ftree-loop-vectorize -ftree-slp-vectorize -ftree-vectorize -fuse-ld=bfd -fuse-linker-plugin -malign-data=cacheline -mrelax-cmpxchg-loop -feliminate-unused-debug-symbols -feliminate-unused-debug-types -flive-range-shrinkage -fno-plt -mtls-dialect=gnu2 -Wl,-sort-common -Wno-error -Wp,-D_REENTRANT -pipe -ffat-lto-objects -fomit-frame-pointer -static-libstdc++ -static-libgcc -mrelax-cmpxchg-loop -pthread -Wl,--build-id=sha1 -Wno-inline -Wno-comment -Wno-int-in-bool-context -fasynchronous-unwind-tables -fPIC ${PGO_USE}"
+export CXXFLAGS_USE="-flto=auto --param=lto-max-streaming-parallelism=20 -fipa-pta -fvisibility-inlines-hidden -m64 -Ofast -mno-vzeroupper -march=skylake -mtune=skylake -mavx -mavx2 -msse2avx -Wall -Wl,--as-needed -Wl,--build-id=sha1 -Wl,--enable-new-dtags -Wl,--hash-style=gnu -Wl,-O2 -Wl,-z,now,-z,relro,-z,max-page-size=0x1000,-z,separate-code -Wno-error -mprefer-vector-width=256 -falign-functions=32 -fdevirtualize-at-ltrans -floop-nest-optimize -floop-block -fno-math-errno -fno-semantic-interposition -Wl,-Bsymbolic-functions -fno-stack-protector -fno-trapping-math -ftree-loop-distribute-patterns -ftree-loop-vectorize -ftree-slp-vectorize -ftree-vectorize -fuse-ld=bfd -fuse-linker-plugin -malign-data=cacheline -mrelax-cmpxchg-loop -feliminate-unused-debug-symbols -feliminate-unused-debug-types -flive-range-shrinkage -fno-plt -mtls-dialect=gnu2 -Wl,-sort-common -Wno-error -Wp,-D_REENTRANT -pipe -ffat-lto-objects -fomit-frame-pointer -static-libstdc++ -static-libgcc -mrelax-cmpxchg-loop -pthread -Wl,--build-id=sha1 -Wno-inline -Wno-class-memaccess -Wno-comment -Wno-int-in-bool-context -fasynchronous-unwind-tables -fPIC ${PGO_USE}"
+export LIBS_USE=""
+#
+export V=1
+export VERBOSE=1
+
+if [[ -n "${PGO_GENERATE_OPT}" ]]; then
+    rm -rf ./builddir/ ||:
+#     rm -rf /var/tmp/pgo/ ||:
+#     mkdir /var/tmp/pgo/ ||:
+    export CFLAGS="${CFLAGS_GENERATE}"
+    export CXXFLAGS="${CXXFLAGS_GENERATE}"
+    export FFLAGS="${FFLAGS_GENERATE}"
+    export FCFLAGS="${FCFLAGS_GENERATE}"
+    export LDFLAGS="${LDFLAGS_GENERATE}"
+    export ASMFLAGS="${ASMFLAGS_GENERATE}"
+    export LIBS="${LIBS_GENERATE}"
+    echo PGO Phase 1
+    meson setup --libdir=lib64 --sysconfdir=/usr/share --prefix=/usr --buildtype=plain -Ddefault_library=both \
+    -Dsystem-lua=true \
+    -Ddoc=disabled \
+    -Dsystemd=enabled \
+    -Dsystemd-user-service=true \
+    -Dintrospection=enabled \
+    -Delogind=disabled \
+    -Dtests=true \
+    builddir
+    ninja -j20 -v -C builddir
+    sudo ninja -C builddir install
+elif [[ -n "${PGO_USE_OPT}" ]]; then
+    rm -rf ./builddir/ ||:
+#     cp -aR /var/tmp/pgo /var/tmp/pgo2
+    export CFLAGS="${CFLAGS_USE}"
+    export CXXFLAGS="${CXXFLAGS_USE}"
+    export FFLAGS="${FFLAGS_USE}"
+    export FCFLAGS="${FCFLAGS_USE}"
+    export LDFLAGS="${LDFLAGS_USE}"
+    export ASMFLAGS="${ASMFLAGS_USE}"
+    export LIBS="${LIBS_USE}"
+    echo PGO Phase 2
+    meson setup --libdir=lib64 --sysconfdir=/usr/share --prefix=/usr --buildtype=plain -Ddefault_library=both \
+    -Dsystem-lua=true \
+    -Ddoc=disabled \
+    -Dsystemd=enabled \
+    -Dsystemd-user-service=true \
+    -Dintrospection=enabled \
+    -Delogind=disabled \
+    -Dtests=false \
+    builddir
+    ninja -j20 -v -C builddir
+    sudo ninja -C builddir install
+elif [[ -n "${TEST_OPT}" ]]; then
+    export CFLAGS="${CFLAGS_GENERATE}"
+    export CXXFLAGS="${CXXFLAGS_GENERATE}"
+    export FFLAGS="${FFLAGS_GENERATE}"
+    export FCFLAGS="${FCFLAGS_GENERATE}"
+    export LDFLAGS="${LDFLAGS_GENERATE}"
+    export ASMFLAGS="${ASMFLAGS_GENERATE}"
+    export LIBS="${LIBS_GENERATE}"
+    echo Test
+    meson test --verbose --num-processes 1 -C builddir ||:
+fi
